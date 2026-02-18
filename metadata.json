@@ -1,0 +1,25 @@
+{
+    "$schema": "https://go.kicad.org/pcm/schemas/v1",
+    "name": "Meine Bibliothek",
+    "description": "Beispiel-Bibliothek mit Symbolen und Footprints",
+    "description_full": "Eine benutzerdefinierte KiCad-Bibliothek mit eigenen Schaltplan-Symbolen und PCB-Footprints.\n\nEnthalten:\n- Symbole: Widerstand, LED\n- Footprints: R_0805, LED_0805",
+    "identifier": "com.github.dein-username.meine-bibliothek",
+    "type": "library",
+    "author": {
+        "name": "Dein Name",
+        "contact": {
+            "web": "https://github.com/dein-username/meine-bibliothek"
+        }
+    },
+    "license": "CC-BY-SA-4.0",
+    "resources": {
+        "homepage": "https://github.com/dein-username/meine-bibliothek"
+    },
+    "versions": [
+        {
+            "version": "1.0.0",
+            "status": "stable",
+            "kicad_version": "8.0"
+        }
+    ]
+}
