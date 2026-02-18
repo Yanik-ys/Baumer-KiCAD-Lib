@@ -1,0 +1,152 @@
+# .github/workflows/release.yml
+# Diese Datei kommt ins Baumer-KiCAD-Lib Repository
+#
+# Auslöser: Neuen Tag pushen (z.B. v1.2.0)
+#   git tag v1.2.0
+#   git push origin v1.2.0
+#
+# Was passiert automatisch:
+# 1. ZIP wird erstellt (korrekte Struktur)
+# 2. SHA-256 wird berechnet
+# 3. GitHub Release wird erstellt + ZIP hochgeladen
+# 4. packages.json + repository.json im kicad-repo werden aktualisiert
+
+name: KiCad Library Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggert bei Tags wie v1.0.0, v1.1.0, etc.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Version aus Tag extrahieren
+        id: version
+        run: |
+          # v1.2.0 -> 1.2.0
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: ZIP erstellen
+        run: |
+          # Nur die relevanten Ordner einpacken (kein Extra-Root-Ordner!)
+          zip -r baumer-kicad-lib.zip \
+            symbols/ \
+            footprints/ \
+            3dmodels/ \
+            resources/ \
+            metadata.json \
+            -x "*.git*" \
+            -x "*.github*"
+          
+          echo "ZIP erstellt:"
+          ls -lh baumer-kicad-lib.zip
+          echo ""
+          echo "Inhalt:"
+          unzip -l baumer-kicad-lib.zip
+
+      - name: SHA-256 + Grössen berechnen
+        id: hash
+        run: |
+          # SHA-256 (kleingeschrieben)
+          SHA=$(sha256sum baumer-kicad-lib.zip | awk '{print $1}')
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "SHA-256: $SHA"
+          
+          # Download-Grösse (ZIP in Bytes)
+          DL_SIZE=$(stat -c%s baumer-kicad-lib.zip)
+          echo "download_size=$DL_SIZE" >> $GITHUB_OUTPUT
+          echo "Download Size: $DL_SIZE"
+          
+          # Install-Grösse (entpackt in Bytes)
+          mkdir -p /tmp/extract
+          unzip -o baumer-kicad-lib.zip -d /tmp/extract
+          INST_SIZE=$(du -sb /tmp/extract | awk '{print $1}')
+          echo "install_size=$INST_SIZE" >> $GITHUB_OUTPUT
+          echo "Install Size: $INST_SIZE"
+
+      - name: GitHub Release erstellen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Baumer KiCAD Library ${{ steps.version.outputs.tag }}"
+          files: baumer-kicad-lib.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: kicad-repo auschecken
+        uses: actions/checkout@v4
+        with:
+          repository: Yanik-ys/kicad-repo
+          token: ${{ secrets.KICAD_REPO_TOKEN }}
+          path: kicad-repo
+
+      - name: packages.json aktualisieren
+        run: |
+          cd kicad-repo
+          
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          SHA="${{ steps.hash.outputs.sha256 }}"
+          DL_SIZE="${{ steps.hash.outputs.download_size }}"
+          INST_SIZE="${{ steps.hash.outputs.install_size }}"
+          DL_URL="https://github.com/Yanik-ys/Baumer-KiCAD-Lib/releases/download/${TAG}/baumer-kicad-lib.zip"
+          
+          # Neuen Versions-Eintrag mit jq erstellen
+          # jq fügt die neue Version oben im Array ein
+          jq --arg ver "$VERSION" \
+             --arg url "$DL_URL" \
+             --arg sha "$SHA" \
+             --argjson dl_size "$DL_SIZE" \
+             --argjson inst_size "$INST_SIZE" \
+             '.packages[0].versions = [{
+                "version": $ver,
+                "status": "stable",
+                "kicad_version": "8.0",
+                "download_url": $url,
+                "download_sha256": $sha,
+                "download_size": $dl_size,
+                "install_size": $inst_size
+              }] + .packages[0].versions' \
+             packages.json > packages_new.json
+          
+          mv packages_new.json packages.json
+          
+          echo "packages.json aktualisiert:"
+          cat packages.json
+
+      - name: repository.json aktualisieren
+        run: |
+          cd kicad-repo
+          
+          # SHA-256 von packages.json berechnen
+          PKG_SHA=$(sha256sum packages.json | awk '{print $1}')
+          TIMESTAMP=$(date +%s)
+          
+          # repository.json mit neuem Hash + Timestamp aktualisieren
+          jq --arg sha "$PKG_SHA" \
+             --argjson ts "$TIMESTAMP" \
+             '.packages.sha256 = $sha | .packages.update_timestamp = $ts' \
+             repository.json > repository_new.json
+          
+          mv repository_new.json repository.json
+          
+          echo "repository.json aktualisiert:"
+          cat repository.json
+
+      - name: Änderungen pushen
+        run: |
+          cd kicad-repo
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add packages.json repository.json
+          git commit -m "Auto-Update: Baumer KiCAD Library ${{ steps.version.outputs.tag }}"
+          git push
